@@ -1,3 +1,26 @@
+import sys
+import os
+
+sys.path.append(
+    os.path.abspath(
+        os.path.join(
+            os.path.dirname(__file__),
+            '..'
+        )
+    )
+)
+
+import streamlit as st
+from transformers import CLIPProcessor, CLIPModel
+from PIL import Image
+from pathlib import Path
+import torch
+import torch.nn.functional as F
+import numpy as np
+import pandas as pd
+import hnswlib
+
+from src.fashion_detector import detect_fashion_items
 import streamlit as st
 from transformers import CLIPProcessor, CLIPModel
 from PIL import Image
@@ -9,7 +32,7 @@ import pandas as pd
 import hnswlib
 from ultralytics import YOLO
 import cv2
-
+from src.crop_regions import generate_region_crops
 # ------------------------------------------------
 # Page Config
 # ------------------------------------------------
@@ -70,21 +93,7 @@ model, processor = load_clip()
 
 st.success("CLIP loaded successfully")
 
-# ------------------------------------------------
-# Load YOLO
-# ------------------------------------------------
 
-@st.cache_resource
-def load_yolo():
-
-    model = YOLO("yolov8n.pt")
-
-    return model
-
-
-yolo_model = load_yolo()
-
-st.success("YOLO loaded successfully")
 
 # ------------------------------------------------
 # Load Embeddings
@@ -189,95 +198,57 @@ if uploaded_file is not None:
     )
 
     # ------------------------------------------------
-    # YOLO Detection
+    # Detect Fashion Items
     # ------------------------------------------------
 
-    image_np = np.array(image)
-
-    results = yolo_model(
-        image_np
-    )
-
-    boxes = results[0].boxes
+    detections = detect_fashion_items(image)
 
     # ------------------------------------------------
-    # No Detection
+    # No detections
     # ------------------------------------------------
 
-    if len(boxes) == 0:
+    if len(detections) == 0:
 
         st.error(
-            "No object detected."
+            "No fashion items detected."
         )
 
         st.stop()
 
     # ------------------------------------------------
-    # First Detection
+    # Display Detected Items
     # ------------------------------------------------
 
-    box = boxes[0]
+    st.subheader("Detected Fashion Items")
 
-    x1, y1, x2, y2 = (
-        box.xyxy[0]
-        .cpu()
-        .numpy()
-        .astype(int)
-    )
+    selected_crop = None
 
+    cols = st.columns(len(detections))
+
+    for idx, det in enumerate(detections):
+
+        with cols[idx]:
+
+            st.image(
+                det["crop"],
+                caption=det["class"]
+            )
+
+            if st.button(
+                f"Search {det['class']}",
+                key=f"det_{idx}"
+            ):
+
+                selected_crop = det["crop"]
     # ------------------------------------------------
-    # Draw Detection Box
-    # ------------------------------------------------
-
-    detection_img = image_np.copy()
-
-    cv2.rectangle(
-        detection_img,
-        (x1, y1),
-        (x2, y2),
-        (0, 255, 0),
-        3
-    )
-
-    st.subheader("YOLO Detection")
-
-    st.image(
-        detection_img,
-        channels="RGB"
-    )
-
-    # ------------------------------------------------
-    # Crop Product
+    # Run Retrieval
     # ------------------------------------------------
 
-    crop = image_np[
-        y1:y2,
-        x1:x2
-    ]
+    if selected_crop is not None:
 
-    crop_pil = Image.fromarray(
-        crop
-    )
-
-    st.subheader("Cropped Product")
-
-    st.image(
-        crop_pil,
-        width=300
-    )
-
-    # ------------------------------------------------
-    # Confirm Crop
-    # ------------------------------------------------
-
-    confirm = st.button(
-        "Confirm Crop"
-    )
-
-    if confirm:
 
         st.success(
-            "Crop confirmed. Running retrieval..."
+            "Running retrieval"
         )
 
         # ------------------------------------------------
@@ -285,16 +256,7 @@ if uploaded_file is not None:
         # ------------------------------------------------
 
         inputs = processor(
-            images=crop_pil,
-            return_tensors="pt"
-        )
-
-        # ------------------------------------------------
-        # Generate Query Embedding
-        # ------------------------------------------------
-
-        inputs = processor(
-            images=crop_pil,
+            images=selected_crop,
             return_tensors="pt"
         )
 
@@ -323,6 +285,7 @@ if uploaded_file is not None:
         )
 
         query_emb = query_emb.cpu().numpy()
+
         # ------------------------------------------------
         # HNSW Retrieval
         # ------------------------------------------------

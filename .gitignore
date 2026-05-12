@@ -1,15 +1,30 @@
-venv/
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 
-data/
-embeddings/
-indexes/
-models/
+# Virtual Environment
+venv/
 
+# Streamlit
 .streamlit/
 
-*.pt
-*.pth
-*.npy
-*.index
+# Large embeddings
+embeddings/*.npy
+
+# HNSW indexes
+indexes/*.index
+
+# Models
+models/**/*.pt
+
+# Dataset
+data/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS files
+.DS_Store
+Thumbs.db
